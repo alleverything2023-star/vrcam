@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VR Fisheye Camera Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: sans-serif;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/VRButton.js"></script>
+</head>
+<body>
+
+<div id="info">
+  <button id="start-btn">カメラを起動</button>
+  <p id="status">ボタンを押してカメラを許可してください。</p>
+</div>
+
+<video id="webcam" autoplay playsinline style="display:none;"></video>
+
+<script>
+  let scene, camera, renderer, video, videoTexture;
+
+  const startBtn = document.getElementById('start-btn');
+  const status = document.getElementById('status');
+  video = document.getElementById('webcam');
+
+  startBtn.addEventListener('click', async () => {
+    try {
+      // カメラ映像の取得 (背面カメラを優先)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: "environment" } },
+        audio: false
+      }).catch(() => {
+        // 背面カメラがない場合は通常のカメラを取得
+        return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      status.textContent = "カメラ接続完了。VRボタンを押して体験を開始してください。";
+      startBtn.style.display = 'none';
+
+      initThreeJS();
+    } catch (err) {
+      status.textContent = "カメラのアクセスに失敗しました: " + err.message;
+    }
+  });
+
+  function initThreeJS() {
+    // 1. シーンとカメラの準備
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 0);
+
+    // 2. レンダラーの設定とWebVRの有効化
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // VR開始ボタンを追加
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    // 3. ビデオテクスチャの生成
+    videoTexture = new THREE.VideoTexture(video);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    videoTexture.format = THREE.RGBFormat;
+
+    // 4. カスタムシェーダー（平面のカメラ映像を魚眼/ドーム状に変換）
+    const fisheyeShaderMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        map: { value: videoTexture },
+        strength: { value: 1.2 } // 歪みの強さ（魚眼の調整パラメータ）
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D map;
+        uniform float strength;
+        varying vec2 vUv;
+
+        void main() {
+          // UV座標を -1.0 ~ 1.0 の範囲に正規化
+          vec2 p = vUv * 2.0 - 1.0;
+          float r = length(p);
+
+          // 魚眼状にUV座標を湾曲歪み計算
+          if (r < 1.0) {
+            float theta = atan(p.y, p.x);
+            float radius = pow(r, strength);
+            vec2 uv;
+            uv.x = radius * cos(theta);
+            uv.y = radius * sin(theta);
+            
+            // 0.0 ~ 1.0 の範囲に戻す
+            uv = (uv + 1.0) * 0.5;
+            gl_FragColor = texture2D(map, uv);
+          } else {
+            // 円の外側は黒
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          }
+        }
+      `,
+      side: THREE.BackSide // 内側から見られるように反転
+    });
+
+    // 5. 球体メッシュを作成してカメラを囲む
+    const geometry = new THREE.SphereGeometry(10, 64, 64);
+    const sphere = new THREE.Mesh(geometry, fisheyeShaderMaterial);
+    scene.add(sphere);
+
+    // 6. アニメーションループ（WebXRに対応したsetAnimationLoopを使用）
+    renderer.setAnimationLoop(render);
+
+    window.addEventListener('resize', onWindowResize);
+  }
+
+  function render() {
+    renderer.render(scene, camera);
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+</script>
+
+</body>
+</html>
