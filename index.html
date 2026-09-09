@@ -62,6 +62,8 @@
 
 <div id="controls">
   <button id="toggleSkeleton">骨格線 ON/OFF</button>
+  <button id="toggleCamera">カメラ映像 ON/OFF</button>
+  <button id="toggleMirror">ミラー反転 ON/OFF</button>
   <button id="clearParticles">光をクリア</button>
 </div>
 
@@ -80,6 +82,9 @@
 const MAX_HANDS = 6;           // 複数人想定(片手/両手 × 人数)。重ければ減らす
 const MAX_PARTICLES = 3000;    // 光の粒子の最大数(パフォーマンス調整用)
 let showSkeleton = true;
+let showCamera = true;         // カメラ映像を背景に表示するか
+let mirrorMode = true;         // 左右反転(セルフィー鏡)するか。設置環境によって切替
+const CAMERA_OPACITY = 0.5;    // カメラ映像の明るさ(0〜1)。0.5=50%暗く
 
 const HAND_COLORS = [
   [80, 200, 255],   // 水色
@@ -164,6 +169,12 @@ const sketch = (p) => {
     document.getElementById('toggleSkeleton').onclick = () => {
       showSkeleton = !showSkeleton;
     };
+    document.getElementById('toggleCamera').onclick = () => {
+      showCamera = !showCamera;
+    };
+    document.getElementById('toggleMirror').onclick = () => {
+      mirrorMode = !mirrorMode;
+    };
     document.getElementById('clearParticles').onclick = () => {
       particles = [];
     };
@@ -174,10 +185,13 @@ const sketch = (p) => {
   };
 
   p.draw = () => {
-    // 残像(トレイル)効果。値を小さくするほど尾を長く引く
+    // 背景: まず黒で塗り、その上にカメラ映像を50%の明るさで重ねる
     p.noStroke();
-    p.fill(0, 0, 0, 40);
+    p.fill(0, 0, 0, 255);
     p.rect(0, 0, p.width, p.height);
+    if (showCamera) {
+      drawCameraBackground(p);
+    }
 
     if (latestResults && latestResults.multiHandLandmarks) {
       const handsLm = latestResults.multiHandLandmarks;
@@ -215,10 +229,35 @@ function averagePoint(lm, indices) {
 }
 
 function toScreen(p, point) {
-  // 前面カメラ映像はミラー表示にする(左右反転)
-  const x = (1 - point.x) * p.width;
+  // mirrorMode が true なら左右反転(セルフィー鏡)して表示
+  const x = mirrorMode ? (1 - point.x) * p.width : point.x * p.width;
   const y = point.y * p.height;
   return { x, y };
+}
+
+function drawCameraBackground(p) {
+  if (!videoElement || videoElement.readyState < 2) return;
+
+  const vw = videoElement.videoWidth;
+  const vh = videoElement.videoHeight;
+  if (!vw || !vh) return;
+
+  // キャンバス全体を覆うように、アスペクト比を保ったまま拡大縮小(cover)
+  const scale = Math.max(p.width / vw, p.height / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  const dx = (p.width - dw) / 2;
+  const dy = (p.height - dh) / 2;
+
+  const ctx = p.drawingContext;
+  ctx.save();
+  ctx.globalAlpha = CAMERA_OPACITY; // 0.5 = 50%の明るさ
+  if (mirrorMode) {
+    ctx.translate(p.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(videoElement, dx, dy, dw, dh);
+  ctx.restore();
 }
 
 function emitGlow(p, point, color, count) {
