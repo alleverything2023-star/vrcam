@@ -85,6 +85,8 @@ let showSkeleton = true;
 let showCamera = true;         // カメラ映像を背景に表示するか
 let mirrorMode = true;         // 左右反転(セルフィー鏡)するか。設置環境によって切替
 const CAMERA_OPACITY = 0.5;    // カメラ映像の明るさ(0〜1)。0.5=50%暗く
+const PARTICLE_LIFE_DECAY = 14; // 大きいほど早く消える(元は6)
+const PARTICLE_SHRINK = 0.94;   // 1に近いほど縮むのが遅い(元は0.985)
 
 const HAND_COLORS = [
   [80, 200, 255],   // 水色
@@ -126,8 +128,8 @@ async function setupHands() {
   hands.setOptions({
     maxNumHands: MAX_HANDS,
     modelComplexity: 1,
-    minDetectionConfidence: 0.6,
-    minTrackingConfidence: 0.5
+    minDetectionConfidence: 0.4,
+    minTrackingConfidence: 0.4
   });
 
   hands.onResults(onResults);
@@ -136,8 +138,8 @@ async function setupHands() {
     onFrame: async () => {
       await hands.send({ image: videoElement });
     },
-    width: 1280,
-    height: 720
+    width: 1920,
+    height: 1080
   });
 
   try {
@@ -284,8 +286,8 @@ function updateAndDrawParticles(p) {
     pt.x += pt.vx;
     pt.y += pt.vy;
     pt.vy -= 0.01; // ふわっと上昇する感じ
-    pt.life -= 6;
-    pt.size *= 0.985;
+    pt.life -= PARTICLE_LIFE_DECAY;
+    pt.size *= PARTICLE_SHRINK;
 
     if (pt.life <= 0 || pt.size < 0.5) {
       particles.splice(i, 1);
