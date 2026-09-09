@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hand Light - 複数人対応 手から光が出るエフェクト</title>
+<title>Hand Light</title>
 <style>
   html, body {
     margin: 0;
@@ -13,41 +13,6 @@
     width: 100%;
     height: 100%;
   }
-  #info {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    color: #fff;
-    font-family: -apple-system, "Hiragino Sans", sans-serif;
-    font-size: 13px;
-    background: rgba(0, 0, 0, 0.45);
-    padding: 10px 14px;
-    border-radius: 10px;
-    z-index: 10;
-    max-width: 320px;
-    line-height: 1.6;
-    backdrop-filter: blur(4px);
-  }
-  #controls {
-    position: fixed;
-    bottom: 12px;
-    left: 12px;
-    z-index: 10;
-    display: flex;
-    gap: 8px;
-  }
-  #controls button {
-    background: rgba(255,255,255,0.12);
-    color: #fff;
-    border: 1px solid rgba(255,255,255,0.3);
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  #controls button:hover {
-    background: rgba(255,255,255,0.25);
-  }
   video {
     display: none;
   }
@@ -55,49 +20,32 @@
 </head>
 <body>
 
-<div id="info">
-  読み込み中… カメラへのアクセスを許可してください。<br>
-  複数人・複数の手を検出し、指先と手のひらから光が出ます。
-</div>
-
-<div id="controls">
-  <button id="toggleSkeleton">骨格線 ON/OFF</button>
-  <button id="toggleCamera">カメラ映像 ON/OFF</button>
-  <button id="toggleMirror">ミラー反転 ON/OFF</button>
-  <button id="clearParticles">光をクリア</button>
-</div>
-
 <video id="video" playsinline></video>
 
-<!-- MediaPipe Hands -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<!-- p5.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 
 <script>
-/* =========================================================
-   設定
-   ========================================================= */
-const MAX_HANDS = 6;           // 複数人想定(片手/両手 × 人数)。重ければ減らす
-const MAX_PARTICLES = 3000;    // 光の粒子の最大数(パフォーマンス調整用)
-let showSkeleton = true;
-let showCamera = true;         // カメラ映像を背景に表示するか
-let mirrorMode = true;         // 左右反転(セルフィー鏡)するか。設置環境によって切替
-const CAMERA_OPACITY = 0.5;    // カメラ映像の明るさ(0〜1)。0.5=50%暗く
-const PARTICLE_LIFE_DECAY = 14; // 大きいほど早く消える(元は6)
-const PARTICLE_SHRINK = 0.94;   // 1に近いほど縮むのが遅い(元は0.985)
+const MAX_HANDS = 6;
+const MAX_PARTICLES = 3000;
+const showSkeleton = false;
+const showCamera = true;
+const mirrorMode = true;
+const CAMERA_OPACITY = 0.5;
+const PARTICLE_LIFE_DECAY = 14;
+const PARTICLE_SHRINK = 0.94;
 
 const HAND_COLORS = [
-  [80, 200, 255],   // 水色
-  [255, 110, 200],  // ピンク
-  [255, 210, 60],   // 黄
-  [120, 255, 140],  // 黄緑
-  [190, 120, 255],  // 紫
-  [255, 140, 60],   // オレンジ
+  [80, 200, 255],
+  [255, 110, 200],
+  [255, 210, 60],
+  [120, 255, 140],
+  [190, 120, 255],
+  [255, 140, 60],
 ];
 
-const FINGER_TIPS = [4, 8, 12, 16, 20]; // 親指〜小指の先端インデックス
+const FINGER_TIPS = [4, 8, 12, 16, 20];
 
 const HAND_CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],
@@ -108,9 +56,6 @@ const HAND_CONNECTIONS = [
   [0,17]
 ];
 
-/* =========================================================
-   MediaPipe Hands セットアップ
-   ========================================================= */
 let latestResults = null;
 let videoElement;
 
@@ -142,20 +87,9 @@ async function setupHands() {
     height: 1080
   });
 
-  try {
-    await camera.start();
-    document.getElementById('info').innerText =
-      'カメラ起動中。手をかざすと光が出ます(複数人対応)。';
-  } catch (err) {
-    document.getElementById('info').innerText =
-      'カメラを起動できませんでした: ' + err.message +
-      ' (https 環境 または localhost で開いてください)';
-  }
+  await camera.start();
 }
 
-/* =========================================================
-   p5.js 描画パート
-   ========================================================= */
 let particles = [];
 
 const sketch = (p) => {
@@ -167,19 +101,6 @@ const sketch = (p) => {
     cnv.style('z-index', '1');
     p.pixelDensity(1);
     p.background(0);
-
-    document.getElementById('toggleSkeleton').onclick = () => {
-      showSkeleton = !showSkeleton;
-    };
-    document.getElementById('toggleCamera').onclick = () => {
-      showCamera = !showCamera;
-    };
-    document.getElementById('toggleMirror').onclick = () => {
-      mirrorMode = !mirrorMode;
-    };
-    document.getElementById('clearParticles').onclick = () => {
-      particles = [];
-    };
   };
 
   p.windowResized = () => {
@@ -187,7 +108,6 @@ const sketch = (p) => {
   };
 
   p.draw = () => {
-    // 背景: まず黒で塗り、その上にカメラ映像を50%の明るさで重ねる
     p.noStroke();
     p.fill(0, 0, 0, 255);
     p.rect(0, 0, p.width, p.height);
@@ -202,11 +122,9 @@ const sketch = (p) => {
         const lm = handsLm[h];
         const color = HAND_COLORS[h % HAND_COLORS.length];
 
-        // 手のひら中心付近から光を放出
         const palm = averagePoint(lm, [0, 5, 9, 13, 17]);
         emitGlow(p, palm, color, 2);
 
-        // 各指先から光の粒子を放出
         for (const tipIdx of FINGER_TIPS) {
           emitGlow(p, lm[tipIdx], color, 3);
         }
@@ -231,7 +149,6 @@ function averagePoint(lm, indices) {
 }
 
 function toScreen(p, point) {
-  // mirrorMode が true なら左右反転(セルフィー鏡)して表示
   const x = mirrorMode ? (1 - point.x) * p.width : point.x * p.width;
   const y = point.y * p.height;
   return { x, y };
@@ -244,7 +161,6 @@ function drawCameraBackground(p) {
   const vh = videoElement.videoHeight;
   if (!vw || !vh) return;
 
-  // キャンバス全体を覆うように、アスペクト比を保ったまま拡大縮小(cover)
   const scale = Math.max(p.width / vw, p.height / vh);
   const dw = vw * scale;
   const dh = vh * scale;
@@ -253,7 +169,7 @@ function drawCameraBackground(p) {
 
   const ctx = p.drawingContext;
   ctx.save();
-  ctx.globalAlpha = CAMERA_OPACITY; // 0.5 = 50%の明るさ
+  ctx.globalAlpha = CAMERA_OPACITY;
   if (mirrorMode) {
     ctx.translate(p.width, 0);
     ctx.scale(-1, 1);
@@ -285,7 +201,7 @@ function updateAndDrawParticles(p) {
     const pt = particles[i];
     pt.x += pt.vx;
     pt.y += pt.vy;
-    pt.vy -= 0.01; // ふわっと上昇する感じ
+    pt.vy -= 0.01;
     pt.life -= PARTICLE_LIFE_DECAY;
     pt.size *= PARTICLE_SHRINK;
 
@@ -297,10 +213,8 @@ function updateAndDrawParticles(p) {
     const alpha = p.map(pt.life, 0, 255, 0, 180);
     const [r, g, b] = pt.color;
 
-    // 外側の柔らかいグロー
     p.fill(r, g, b, alpha * 0.25);
     p.circle(pt.x, pt.y, pt.size * 2.4);
-    // 内側の明るいコア(白っぽく)
     p.fill(255, 255, 255, alpha * 0.5);
     p.circle(pt.x, pt.y, pt.size * 0.6);
     p.fill(r, g, b, alpha);
