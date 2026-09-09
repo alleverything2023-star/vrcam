@@ -13,41 +13,39 @@
     width: 100%;
     height: 100%;
   }
-  video {
-    display: none;
-  }
+  video { display: none; }
 </style>
 </head>
 <body>
 
-<video id="video" playsinline></video>
+<video id="cam" playsinline></video>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 
 <script>
-const MAX_HANDS = 6;
-const MAX_PARTICLES = 3000;
-const showSkeleton = false;
-const showCamera = true;
-const mirrorMode = true;
-const CAMERA_OPACITY = 0.5;
-const PARTICLE_LIFE_DECAY = 14;
-const PARTICLE_SHRINK = 0.94;
+var MAX_HANDS = 6;
+var MAX_PARTS = 3000;
+var MIRROR = true;
+var CAM_BG = true;
+var SKELETON = false;
+var BG_ALPHA = 0.5;
+var LIFE_DECAY = 14;
+var SHRINK = 0.94;
 
-const HAND_COLORS = [
+var COLORS = [
   [80, 200, 255],
   [255, 110, 200],
   [255, 210, 60],
   [120, 255, 140],
   [190, 120, 255],
-  [255, 140, 60],
+  [255, 140, 60]
 ];
 
-const FINGER_TIPS = [4, 8, 12, 16, 20];
+var TIPS = [4, 8, 12, 16, 20];
 
-const HAND_CONNECTIONS = [
+var BONES = [
   [0,1],[1,2],[2,3],[3,4],
   [0,5],[5,6],[6,7],[7,8],
   [5,9],[9,10],[10,11],[11,12],
@@ -56,18 +54,19 @@ const HAND_CONNECTIONS = [
   [0,17]
 ];
 
-let latestResults = null;
-let videoElement;
+let handData = null;
+let camVideo;
+let parts = [];
 
-function onResults(results) {
-  latestResults = results;
+function onHandsResult(res) {
+  handData = res;
 }
 
-async function setupHands() {
-  videoElement = document.getElementById('video');
+async function initCamera() {
+  camVideo = document.getElementById('cam');
 
   const hands = new Hands({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
   });
 
   hands.setOptions({
@@ -77,166 +76,157 @@ async function setupHands() {
     minTrackingConfidence: 0.4
   });
 
-  hands.onResults(onResults);
+  hands.onResults(onHandsResult);
 
-  const camera = new Camera(videoElement, {
-    onFrame: async () => {
-      await hands.send({ image: videoElement });
-    },
+  const cam = new Camera(camVideo, {
+    onFrame: async () => { await hands.send({ image: camVideo }); },
     width: 1920,
     height: 1080
   });
 
-  await camera.start();
+  await cam.start();
 }
 
-let particles = [];
-
 const sketch = (p) => {
-  p.setup = () => {
-    const cnv = p.createCanvas(p.windowWidth, p.windowHeight);
-    cnv.style('position', 'fixed');
-    cnv.style('top', '0');
-    cnv.style('left', '0');
-    cnv.style('z-index', '1');
+
+  p.setup = function () {
+    const c = p.createCanvas(p.windowWidth, p.windowHeight);
+    c.style('position', 'fixed');
+    c.style('top', '0');
+    c.style('left', '0');
+    c.style('z-index', '1');
     p.pixelDensity(1);
     p.background(0);
   };
 
-  p.windowResized = () => {
-    p.resizeCanvas(p.windowWidth, p.windowHeight);
-  };
+  p.windowResized = () => p.resizeCanvas(p.windowWidth, p.windowHeight);
 
   p.draw = () => {
     p.noStroke();
     p.fill(0, 0, 0, 255);
     p.rect(0, 0, p.width, p.height);
-    if (showCamera) {
-      drawCameraBackground(p);
-    }
 
-    if (latestResults && latestResults.multiHandLandmarks) {
-      const handsLm = latestResults.multiHandLandmarks;
+    if (CAM_BG) drawCam(p);
 
-      for (let h = 0; h < handsLm.length; h++) {
-        const lm = handsLm[h];
-        const color = HAND_COLORS[h % HAND_COLORS.length];
+    if (handData && handData.multiHandLandmarks) {
+      const list = handData.multiHandLandmarks;
 
-        const palm = averagePoint(lm, [0, 5, 9, 13, 17]);
-        emitGlow(p, palm, color, 2);
+      for (let h = 0; h < list.length; h++) {
+        const lm = list[h];
+        const col = COLORS[h % COLORS.length];
 
-        for (const tipIdx of FINGER_TIPS) {
-          emitGlow(p, lm[tipIdx], color, 3);
+        let px = 0, py = 0;
+        const palmIdx = [0, 5, 9, 13, 17];
+        for (let k = 0; k < palmIdx.length; k++) {
+          px += lm[palmIdx[k]].x;
+          py += lm[palmIdx[k]].y;
+        }
+        px /= palmIdx.length;
+        py /= palmIdx.length;
+        spawnParticles(p, { x: px, y: py }, col, 2);
+
+        for (let t = 0; t < TIPS.length; t++) {
+          spawnParticles(p, lm[TIPS[t]], col, 3);
         }
 
-        if (showSkeleton) {
-          drawSkeleton(p, lm, color);
-        }
+        if (SKELETON) drawBones(p, lm, col);
       }
     }
 
-    updateAndDrawParticles(p);
+    drawParticles(p);
   };
 };
 
-function averagePoint(lm, indices) {
-  let x = 0, y = 0;
-  for (const i of indices) {
-    x += lm[i].x;
-    y += lm[i].y;
-  }
-  return { x: x / indices.length, y: y / indices.length };
+function project(p, pt) {
+  const x = MIRROR ? (1 - pt.x) * p.width : pt.x * p.width;
+  const y = pt.y * p.height;
+  return { x: x, y: y };
 }
 
-function toScreen(p, point) {
-  const x = mirrorMode ? (1 - point.x) * p.width : point.x * p.width;
-  const y = point.y * p.height;
-  return { x, y };
-}
-
-function drawCameraBackground(p) {
-  if (!videoElement || videoElement.readyState < 2) return;
-
-  const vw = videoElement.videoWidth;
-  const vh = videoElement.videoHeight;
+function drawCam(p) {
+  if (!camVideo || camVideo.readyState < 2) return;
+  const vw = camVideo.videoWidth;
+  const vh = camVideo.videoHeight;
   if (!vw || !vh) return;
 
-  const scale = Math.max(p.width / vw, p.height / vh);
-  const dw = vw * scale;
-  const dh = vh * scale;
+  const s = Math.max(p.width / vw, p.height / vh);
+  const dw = vw * s;
+  const dh = vh * s;
   const dx = (p.width - dw) / 2;
   const dy = (p.height - dh) / 2;
 
   const ctx = p.drawingContext;
   ctx.save();
-  ctx.globalAlpha = CAMERA_OPACITY;
-  if (mirrorMode) {
+  ctx.globalAlpha = BG_ALPHA;
+  if (MIRROR) {
     ctx.translate(p.width, 0);
     ctx.scale(-1, 1);
   }
-  ctx.drawImage(videoElement, dx, dy, dw, dh);
+  ctx.drawImage(camVideo, dx, dy, dw, dh);
   ctx.restore();
 }
 
-function emitGlow(p, point, color, count) {
-  const pos = toScreen(p, point);
-  for (let i = 0; i < count; i++) {
-    if (particles.length >= MAX_PARTICLES) particles.shift();
-    particles.push({
+function spawnParticles(p, pt, col, n) {
+  const pos = project(p, pt);
+  for (let i = 0; i < n; i++) {
+    if (parts.length >= MAX_PARTS) parts.shift();
+    parts.push({
       x: pos.x + p.random(-4, 4),
       y: pos.y + p.random(-4, 4),
       vx: p.random(-0.6, 0.6),
       vy: p.random(-1.3, -0.3),
       life: 255,
       size: p.random(6, 22),
-      color: color
+      col: col
     });
   }
 }
 
-function updateAndDrawParticles(p) {
+function drawParticles(p) {
   p.blendMode(p.ADD);
   p.noStroke();
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const pt = particles[i];
+
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const pt = parts[i];
     pt.x += pt.vx;
     pt.y += pt.vy;
     pt.vy -= 0.01;
-    pt.life -= PARTICLE_LIFE_DECAY;
-    pt.size *= PARTICLE_SHRINK;
+    pt.life -= LIFE_DECAY;
+    pt.size *= SHRINK;
 
     if (pt.life <= 0 || pt.size < 0.5) {
-      particles.splice(i, 1);
+      parts.splice(i, 1);
       continue;
     }
 
-    const alpha = p.map(pt.life, 0, 255, 0, 180);
-    const [r, g, b] = pt.color;
+    const a = p.map(pt.life, 0, 255, 0, 180);
+    const c = pt.col;
 
-    p.fill(r, g, b, alpha * 0.25);
+    p.fill(c[0], c[1], c[2], a * 0.25);
     p.circle(pt.x, pt.y, pt.size * 2.4);
-    p.fill(255, 255, 255, alpha * 0.5);
+    p.fill(255, 255, 255, a * 0.5);
     p.circle(pt.x, pt.y, pt.size * 0.6);
-    p.fill(r, g, b, alpha);
+    p.fill(c[0], c[1], c[2], a);
     p.circle(pt.x, pt.y, pt.size);
   }
+
   p.blendMode(p.BLEND);
 }
 
-function drawSkeleton(p, lm, color) {
+function drawBones(p, lm, col) {
   p.blendMode(p.ADD);
-  p.stroke(color[0], color[1], color[2], 60);
+  p.stroke(col[0], col[1], col[2], 60);
   p.strokeWeight(2);
-  for (const [a, b] of HAND_CONNECTIONS) {
-    const pa = toScreen(p, lm[a]);
-    const pb = toScreen(p, lm[b]);
-    p.line(pa.x, pa.y, pb.x, pb.y);
+  for (let i = 0; i < BONES.length; i++) {
+    const a = project(p, lm[BONES[i][0]]);
+    const b = project(p, lm[BONES[i][1]]);
+    p.line(a.x, a.y, b.x, b.y);
   }
   p.blendMode(p.BLEND);
 }
 
 new p5(sketch);
-setupHands();
+initCamera();
 </script>
 </body>
 </html>
