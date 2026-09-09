@@ -1,160 +1,287 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Fisheye Camera Viewer</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #000;
-      font-family: sans-serif;
-    }
-    #info {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      color: white;
-      z-index: 10;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 10px;
-      border-radius: 8px;
-    }
-    button {
-      padding: 8px 16px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-  </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/VRButton.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Light - 複数人対応 手から光が出るエフェクト</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #000;
+    width: 100%;
+    height: 100%;
+  }
+  #info {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    color: #fff;
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    font-size: 13px;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 10px 14px;
+    border-radius: 10px;
+    z-index: 10;
+    max-width: 320px;
+    line-height: 1.6;
+    backdrop-filter: blur(4px);
+  }
+  #controls {
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+  }
+  #controls button {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #controls button:hover {
+    background: rgba(255,255,255,0.25);
+  }
+  video {
+    display: none;
+  }
+</style>
 </head>
 <body>
 
 <div id="info">
-  <button id="start-btn">カメラを起動</button>
-  <p id="status">ボタンを押してカメラを許可してください。</p>
+  読み込み中… カメラへのアクセスを許可してください。<br>
+  複数人・複数の手を検出し、指先と手のひらから光が出ます。
 </div>
 
-<video id="webcam" autoplay playsinline style="display:none;"></video>
+<div id="controls">
+  <button id="toggleSkeleton">骨格線 ON/OFF</button>
+  <button id="clearParticles">光をクリア</button>
+</div>
+
+<video id="video" playsinline></video>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<!-- p5.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 
 <script>
-  let scene, camera, renderer, video, videoTexture;
+/* =========================================================
+   設定
+   ========================================================= */
+const MAX_HANDS = 6;           // 複数人想定(片手/両手 × 人数)。重ければ減らす
+const MAX_PARTICLES = 3000;    // 光の粒子の最大数(パフォーマンス調整用)
+let showSkeleton = true;
 
-  const startBtn = document.getElementById('start-btn');
-  const status = document.getElementById('status');
-  video = document.getElementById('webcam');
+const HAND_COLORS = [
+  [80, 200, 255],   // 水色
+  [255, 110, 200],  // ピンク
+  [255, 210, 60],   // 黄
+  [120, 255, 140],  // 黄緑
+  [190, 120, 255],  // 紫
+  [255, 140, 60],   // オレンジ
+];
 
-  startBtn.addEventListener('click', async () => {
-    try {
-      // カメラ映像の取得 (背面カメラを優先)
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { exact: "environment" } },
-        audio: false
-      }).catch(() => {
-        // 背面カメラがない場合は通常のカメラを取得
-        return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      });
+const FINGER_TIPS = [4, 8, 12, 16, 20]; // 親指〜小指の先端インデックス
 
-      video.srcObject = stream;
-      await video.play();
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
 
-      status.textContent = "カメラ接続完了。VRボタンを押して体験を開始してください。";
-      startBtn.style.display = 'none';
+/* =========================================================
+   MediaPipe Hands セットアップ
+   ========================================================= */
+let latestResults = null;
+let videoElement;
 
-      initThreeJS();
-    } catch (err) {
-      status.textContent = "カメラのアクセスに失敗しました: " + err.message;
-    }
+function onResults(results) {
+  latestResults = results;
+}
+
+async function setupHands() {
+  videoElement = document.getElementById('video');
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
 
-  function initThreeJS() {
-    // 1. シーンとカメラの準備
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 0);
+  hands.setOptions({
+    maxNumHands: MAX_HANDS,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5
+  });
 
-    // 2. レンダラーの設定とWebVRの有効化
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
+  hands.onResults(onResults);
 
-    // VR開始ボタンを追加
-    document.body.appendChild(VRButton.createButton(renderer));
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await hands.send({ image: videoElement });
+    },
+    width: 1280,
+    height: 720
+  });
 
-    // 3. ビデオテクスチャの生成
-    videoTexture = new THREE.VideoTexture(video);
-    videoTexture.minFilter = THREE.LinearFilter;
-    videoTexture.magFilter = THREE.LinearFilter;
-    videoTexture.format = THREE.RGBFormat;
+  try {
+    await camera.start();
+    document.getElementById('info').innerText =
+      'カメラ起動中。手をかざすと光が出ます(複数人対応)。';
+  } catch (err) {
+    document.getElementById('info').innerText =
+      'カメラを起動できませんでした: ' + err.message +
+      ' (https 環境 または localhost で開いてください)';
+  }
+}
 
-    // 4. カスタムシェーダー（平面のカメラ映像を魚眼/ドーム状に変換）
-    const fisheyeShaderMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        map: { value: videoTexture },
-        strength: { value: 1.2 } // 歪みの強さ（魚眼の調整パラメータ）
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+/* =========================================================
+   p5.js 描画パート
+   ========================================================= */
+let particles = [];
+
+const sketch = (p) => {
+  p.setup = () => {
+    const cnv = p.createCanvas(p.windowWidth, p.windowHeight);
+    cnv.style('position', 'fixed');
+    cnv.style('top', '0');
+    cnv.style('left', '0');
+    cnv.style('z-index', '1');
+    p.pixelDensity(1);
+    p.background(0);
+
+    document.getElementById('toggleSkeleton').onclick = () => {
+      showSkeleton = !showSkeleton;
+    };
+    document.getElementById('clearParticles').onclick = () => {
+      particles = [];
+    };
+  };
+
+  p.windowResized = () => {
+    p.resizeCanvas(p.windowWidth, p.windowHeight);
+  };
+
+  p.draw = () => {
+    // 残像(トレイル)効果。値を小さくするほど尾を長く引く
+    p.noStroke();
+    p.fill(0, 0, 0, 40);
+    p.rect(0, 0, p.width, p.height);
+
+    if (latestResults && latestResults.multiHandLandmarks) {
+      const handsLm = latestResults.multiHandLandmarks;
+
+      for (let h = 0; h < handsLm.length; h++) {
+        const lm = handsLm[h];
+        const color = HAND_COLORS[h % HAND_COLORS.length];
+
+        // 手のひら中心付近から光を放出
+        const palm = averagePoint(lm, [0, 5, 9, 13, 17]);
+        emitGlow(p, palm, color, 2);
+
+        // 各指先から光の粒子を放出
+        for (const tipIdx of FINGER_TIPS) {
+          emitGlow(p, lm[tipIdx], color, 3);
         }
-      `,
-      fragmentShader: `
-        uniform sampler2D map;
-        uniform float strength;
-        varying vec2 vUv;
 
-        void main() {
-          // UV座標を -1.0 ~ 1.0 の範囲に正規化
-          vec2 p = vUv * 2.0 - 1.0;
-          float r = length(p);
-
-          // 魚眼状にUV座標を湾曲歪み計算
-          if (r < 1.0) {
-            float theta = atan(p.y, p.x);
-            float radius = pow(r, strength);
-            vec2 uv;
-            uv.x = radius * cos(theta);
-            uv.y = radius * sin(theta);
-            
-            // 0.0 ~ 1.0 の範囲に戻す
-            uv = (uv + 1.0) * 0.5;
-            gl_FragColor = texture2D(map, uv);
-          } else {
-            // 円の外側は黒
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-          }
+        if (showSkeleton) {
+          drawSkeleton(p, lm, color);
         }
-      `,
-      side: THREE.BackSide // 内側から見られるように反転
+      }
+    }
+
+    updateAndDrawParticles(p);
+  };
+};
+
+function averagePoint(lm, indices) {
+  let x = 0, y = 0;
+  for (const i of indices) {
+    x += lm[i].x;
+    y += lm[i].y;
+  }
+  return { x: x / indices.length, y: y / indices.length };
+}
+
+function toScreen(p, point) {
+  // 前面カメラ映像はミラー表示にする(左右反転)
+  const x = (1 - point.x) * p.width;
+  const y = point.y * p.height;
+  return { x, y };
+}
+
+function emitGlow(p, point, color, count) {
+  const pos = toScreen(p, point);
+  for (let i = 0; i < count; i++) {
+    if (particles.length >= MAX_PARTICLES) particles.shift();
+    particles.push({
+      x: pos.x + p.random(-4, 4),
+      y: pos.y + p.random(-4, 4),
+      vx: p.random(-0.6, 0.6),
+      vy: p.random(-1.3, -0.3),
+      life: 255,
+      size: p.random(6, 22),
+      color: color
     });
-
-    // 5. 球体メッシュを作成してカメラを囲む
-    const geometry = new THREE.SphereGeometry(10, 64, 64);
-    const sphere = new THREE.Mesh(geometry, fisheyeShaderMaterial);
-    scene.add(sphere);
-
-    // 6. アニメーションループ（WebXRに対応したsetAnimationLoopを使用）
-    renderer.setAnimationLoop(render);
-
-    window.addEventListener('resize', onWindowResize);
   }
+}
 
-  function render() {
-    renderer.render(scene, camera);
-  }
+function updateAndDrawParticles(p) {
+  p.blendMode(p.ADD);
+  p.noStroke();
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const pt = particles[i];
+    pt.x += pt.vx;
+    pt.y += pt.vy;
+    pt.vy -= 0.01; // ふわっと上昇する感じ
+    pt.life -= 6;
+    pt.size *= 0.985;
 
-  function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    if (pt.life <= 0 || pt.size < 0.5) {
+      particles.splice(i, 1);
+      continue;
+    }
+
+    const alpha = p.map(pt.life, 0, 255, 0, 180);
+    const [r, g, b] = pt.color;
+
+    // 外側の柔らかいグロー
+    p.fill(r, g, b, alpha * 0.25);
+    p.circle(pt.x, pt.y, pt.size * 2.4);
+    // 内側の明るいコア(白っぽく)
+    p.fill(255, 255, 255, alpha * 0.5);
+    p.circle(pt.x, pt.y, pt.size * 0.6);
+    p.fill(r, g, b, alpha);
+    p.circle(pt.x, pt.y, pt.size);
   }
+  p.blendMode(p.BLEND);
+}
+
+function drawSkeleton(p, lm, color) {
+  p.blendMode(p.ADD);
+  p.stroke(color[0], color[1], color[2], 60);
+  p.strokeWeight(2);
+  for (const [a, b] of HAND_CONNECTIONS) {
+    const pa = toScreen(p, lm[a]);
+    const pb = toScreen(p, lm[b]);
+    p.line(pa.x, pa.y, pb.x, pb.y);
+  }
+  p.blendMode(p.BLEND);
+}
+
+new p5(sketch);
+setupHands();
 </script>
-
 </body>
 </html>
