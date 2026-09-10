@@ -57,6 +57,7 @@ var BONES = [
 let handData = null;
 let camVideo;
 let parts = [];
+let gestureFlags = {};
 
 function onHandsResult(res) {
   handData = res;
@@ -130,12 +131,51 @@ const sketch = (p) => {
         }
 
         if (SKELETON) drawBones(p, lm, col);
+
+        const middleUp = isMiddleFingerGesture(lm);
+        if (middleUp && !gestureFlags[h]) {
+          fireMiddleFingerBlast(p, lm, col);
+        }
+        gestureFlags[h] = middleUp;
       }
     }
 
     drawParticles(p);
   };
 };
+
+function fingerUp(lm, tip, pip, wrist) {
+  wrist = wrist || 0;
+  const w = lm[wrist];
+  const dTip = Math.hypot(lm[tip].x - w.x, lm[tip].y - w.y);
+  const dPip = Math.hypot(lm[pip].x - w.x, lm[pip].y - w.y);
+  return dTip > dPip * 1.15;
+}
+
+function isMiddleFingerGesture(lm) {
+  const index = fingerUp(lm, 8, 6);
+  const middle = fingerUp(lm, 12, 10);
+  const ring = fingerUp(lm, 16, 14);
+  const pinky = fingerUp(lm, 20, 18);
+  return middle && !index && !ring && !pinky;
+}
+
+function fireMiddleFingerBlast(p, lm, col) {
+  const pos = project(p, lm[12]);
+  for (let i = 0; i < 60; i++) {
+    const ang = p.random(p.TWO_PI);
+    const spd = p.random(2, 8);
+    parts.push({
+      x: pos.x,
+      y: pos.y,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      life: 255,
+      size: p.random(10, 30),
+      col: col
+    });
+  }
+}
 
 function project(p, pt) {
   const x = MIRROR ? (1 - pt.x) * p.width : pt.x * p.width;
