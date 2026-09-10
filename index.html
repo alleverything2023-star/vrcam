@@ -59,6 +59,8 @@ let camVideo;
 let parts = [];
 let gestureFlags = {};
 
+const ye = new Audio('ye.mp3');
+
 function onHandsResult(res) {
   handData = res;
 }
@@ -161,6 +163,8 @@ function isMiddleFingerGesture(lm) {
 }
 
 function fireMiddleFingerBlast(p, lm, col) {
+  ye.currentTime = 0;
+  ye.play();
   const pos = project(p, lm[12]);
   for (let i = 0; i < 60; i++) {
     const ang = p.random(p.TWO_PI);
