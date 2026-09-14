@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Body Motion Light & Halftone Eraser</title>
+<title>Body Motion & Halftone</title>
 <style>
   html, body {
     margin: 0;
@@ -44,16 +44,16 @@
 
 <div id="controls">
   <select id="modeSelect">
-    <option value="A">モード A: 全身パーティクル＆スケルトン</option>
-    <option value="B" selected>モード B: 全身ドットモザイク＆身体軸（擦り抜き）</option>
+    <option value="A">モードA</option>
+    <option value="B" selected>モードB</option>
   </select>
 </div>
 
 <video id="cam" playsinline></video>
 
-<!-- MediaPipe Pose -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<!-- MediaPipe Pose & Camera Utils -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
 
 <script>
@@ -72,21 +72,15 @@ var COLORS = [
   [255, 140, 60]
 ];
 
-// MediaPipe Pose 骨格接続定義
+// 骨格接続定義
 var POSE_BONES = [
-  // 腕
-  [11, 13], [13, 15], [12, 14], [14, 16],
-  // 胴体
-  [11, 12], [11, 23], [12, 24], [23, 24],
-  // 脚
-  [23, 25], [25, 27], [24, 26], [26, 28],
-  // 頭部周辺
-  [0, 1], [1, 2], [2, 3], [3, 7],
-  [0, 4], [4, 5], [5, 6], [6, 8],
-  [9, 10]
+  [11, 13], [13, 15], [12, 14], [14, 16], // 腕
+  [11, 12], [11, 23], [12, 24], [23, 24], // 胴体
+  [23, 25], [25, 27], [24, 26], [26, 28], // 脚
+  [0, 1], [1, 2], [2, 3], [3, 7],         // 顔周り
+  [0, 4], [4, 5], [5, 6], [6, 8]
 ];
 
-// 軌跡・エフェクトを発生させる主要部位のインデックス
 var KEY_JOINTS = [0, 15, 16, 17, 18, 19, 20, 27, 28, 31, 32]; 
 
 let poseData = null;
@@ -94,7 +88,7 @@ let camVideo;
 let parts = [];
 let currentMode = 'B';
 
-// モードB（ドットモザイク＆擦り抜き）用
+// モードB用パラメータ
 let eraseGfx;
 let gridStep = 14;
 let eraseTrails = [];
@@ -120,7 +114,11 @@ async function initCamera() {
   pose.onResults(onPoseResult);
 
   const cam = new Camera(camVideo, {
-    onFrame: async () => { await pose.send({ image: camVideo }); },
+    onFrame: async () => {
+      if (camVideo.readyState >= 2) {
+        await pose.send({ image: camVideo });
+      }
+    },
     width: 1280,
     height: 720
   });
@@ -147,6 +145,8 @@ const sketch = (p) => {
       parts = [];
       eraseTrails = [];
     });
+
+    initCamera();
   };
 
   p.windowResized = () => {
@@ -163,7 +163,7 @@ const sketch = (p) => {
   };
 };
 
-/* ================= モード A（全身パーティクル & スケルトン） ================= */
+/* ================= モード A ================= */
 function drawModeA(p) {
   p.noStroke();
   p.fill(0, 0, 0, 255);
@@ -175,7 +175,6 @@ function drawModeA(p) {
     const lm = poseData.poseLandmarks;
     const col = COLORS[0];
 
-    // 主要関節からパーティクルを発生
     for (let i = 0; i < KEY_JOINTS.length; i++) {
       const idx = KEY_JOINTS[i];
       if (lm[idx] && lm[idx].visibility > 0.5) {
@@ -183,27 +182,23 @@ function drawModeA(p) {
       }
     }
 
-    // 骨格を描画
     drawPoseBones(p, lm, col);
-    
-    // 身体軸を描画
     drawBodyAxis(p, lm);
   }
 
   drawParticles(p);
 }
 
-/* ================= モード B（全身ドットモザイク ＆ 身体軸） ================= */
+/* ================= モード B ================= */
 function drawModeB(p) {
   p.background(240);
 
   if (!camVideo || camVideo.readyState < 2) return;
 
-  // 1. 全身の主要ランドマークから擦り抜き軌跡を生成
+  // 1. 身体軌跡を生成
   if (poseData && poseData.poseLandmarks) {
     const lm = poseData.poseLandmarks;
 
-    // 頭・手首・足首など動きの大きい関節を中心に軌跡を発生
     for (let i = 0; i < KEY_JOINTS.length; i++) {
       const idx = KEY_JOINTS[i];
       if (lm[idx] && lm[idx].visibility > 0.4) {
@@ -217,7 +212,7 @@ function drawModeB(p) {
       }
     }
 
-    // 胴体（胸・腰周辺）にも大きめの擦り抜き領域を追加
+    // 胴体部分
     if (lm[11] && lm[12] && lm[23] && lm[24]) {
       const centerX = (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4;
       const centerY = (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4;
@@ -231,7 +226,7 @@ function drawModeB(p) {
     }
   }
 
-  // 2. マスクバッファ（eraseGfx）のアップデート
+  // 2. マスクの描画・更新
   eraseGfx.clear();
   eraseGfx.noStroke();
   eraseGfx.fill(255);
@@ -246,7 +241,7 @@ function drawModeB(p) {
     }
   }
 
-  // 3. ドットモザイク（ハーフトーン）の描画
+  // 3. ドットモザイク描画
   const vw = camVideo.videoWidth;
   const vh = camVideo.videoHeight;
   if (!vw || !vh) return;
@@ -285,11 +280,9 @@ function drawModeB(p) {
       let eraseVal = eraseGfx.pixels[index + 3];
 
       if (eraseVal > 50) {
-        // 身体が動いた箇所：カラー映像を反映してドット表示
         p.fill(r, g, b);
         p.circle(x, y, gridStep * 0.95);
       } else {
-        // 通常の背景：輝度に応じた黒のドットモザイク
         let radius = p.map(bright, 0, 255, gridStep * 0.85, 1.5);
         p.fill(20, 20, 20);
         p.circle(x, y, radius);
@@ -299,11 +292,10 @@ function drawModeB(p) {
 
   camGfx.remove();
 
-  // 4. 身体の主要ポイントと「身体の軸」を重ねて描画
+  // 4. トラッキングポイント・身体の軸の描画
   if (poseData && poseData.poseLandmarks) {
     const lm = poseData.poseLandmarks;
 
-    // 関節のマーク（青丸）
     p.fill(30, 100, 255);
     p.noStroke();
     for (let i = 0; i < KEY_JOINTS.length; i++) {
@@ -314,25 +306,21 @@ function drawModeB(p) {
       }
     }
 
-    // 身体の軸（縦ライン）
     drawBodyAxis(p, lm);
   }
 }
 
-/* ================= 身体の軸を描画 ================= */
+/* ================= 身体の軸描画 ================= */
 function drawBodyAxis(p, lm) {
-  // 左肩(11), 右肩(12), 左腰(23), 右腰(24) が検出されている場合
   if (lm[11] && lm[12] && lm[23] && lm[24] &&
       lm[11].visibility > 0.5 && lm[12].visibility > 0.5 &&
       lm[23].visibility > 0.5 && lm[24].visibility > 0.5) {
     
-    // 両肩の中点（上軸）
     const shoulderCenter = {
       x: (lm[11].x + lm[12].x) / 2,
       y: (lm[11].y + lm[12].y) / 2
     };
 
-    // 両腰の中点（下軸）
     const hipCenter = {
       x: (lm[23].x + lm[24].x) / 2,
       y: (lm[23].y + lm[24].y) / 2
@@ -341,26 +329,24 @@ function drawBodyAxis(p, lm) {
     const topPos = project(p, shoulderCenter);
     const bottomPos = project(p, hipCenter);
 
-    // 軸線の延長線（頭頂〜足元付近まで延ばす計算）
     const dx = bottomPos.x - topPos.x;
     const dy = bottomPos.y - topPos.y;
     const extTop = { x: topPos.x - dx * 0.8, y: topPos.y - dy * 0.8 };
     const extBottom = { x: bottomPos.x + dx * 1.2, y: bottomPos.y + dy * 1.2 };
 
     p.push();
-    // 赤く光る中心軸
+    // 垂直軸（赤）
     p.stroke(255, 50, 50, 200);
     p.strokeWeight(4);
     p.line(extTop.x, extTop.y, extBottom.x, extBottom.y);
 
-    // 肩の横軸（水平バランス）
+    // 肩の水平軸（黄）
     const sLeft = project(p, lm[11]);
     const sRight = project(p, lm[12]);
-    p.stroke(255, 215, 0, 180); // 金色
+    p.stroke(255, 215, 0, 180);
     p.strokeWeight(2);
     p.line(sLeft.x, sLeft.y, sRight.x, sRight.y);
 
-    // 軸上のポイント（中心点）
     p.fill(255, 255, 255);
     p.noStroke();
     p.circle(topPos.x, topPos.y, 10);
@@ -369,7 +355,7 @@ function drawBodyAxis(p, lm) {
   }
 }
 
-/* ================= 骨格の接続描画 ================= */
+/* ================= 骨格描画 ================= */
 function drawPoseBones(p, lm, col) {
   p.blendMode(p.ADD);
   p.stroke(col[0], col[1], col[2], 120);
@@ -387,7 +373,7 @@ function drawPoseBones(p, lm, col) {
   p.noStroke();
 }
 
-/* ================= 共通ヘルパー関数 ================= */
+/* ================= 共通関数 ================= */
 function project(p, pt) {
   const x = MIRROR ? (1 - pt.x) * p.width : pt.x * p.width;
   const y = pt.y * p.height;
@@ -465,7 +451,6 @@ function drawParticles(p) {
 }
 
 new p5(sketch);
-initCamera();
 </script>
 </body>
 </html>
