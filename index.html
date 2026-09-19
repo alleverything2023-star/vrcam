@@ -15,11 +15,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sa
 #modeSelect option{color:#000}
 #modeSelect:focus-visible,#helpBtn:focus-visible{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.5)}
 
-/* 画面下のヒント */
 #hint{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:40;max-width:calc(100% - 32px);box-sizing:border-box;padding:10px 16px;border-radius:12px;background:rgba(20,20,20,.62);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:14px;line-height:1.6;text-align:center;opacity:0;transition:opacity .3s;pointer-events:none;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 #hint.show{opacity:1}
-
-/* 遊び方パネル */
+  
 #intro{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;background:rgba(0,0,0,.74);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
 #intro.open{display:flex}
 #intro .panel{width:100%;max-width:460px;max-height:100%;overflow-y:auto;box-sizing:border-box;padding:24px 22px 20px;border-radius:14px;background:rgba(18,18,22,.9);border:1px solid rgba(255,255,255,.18);color:#fff}
@@ -100,7 +98,6 @@ let audioUnlocked=false;
 const ye=new Audio('ye.mp3');
 let currentMode='A';
 
-/* ---- 遊び方・ヒント用 ---- */
 const MODE_HINTS={
   A:'手を映すと光が出ます。両手で拍手すると弾けます',
   B:'体や手を動かすと、丸い点が押しのけられます',
@@ -724,12 +721,6 @@ function fireMiddleFingerBlast(p,lm,col){
 }
 
 function project(p,pt){
-  /*
-  MediaPipeの座標は「元のカメラ映像」の座標。
-  画面への表示はcoverなので、縦横比が違うと左右/上下が切り取られる。
-  drawCam() / drawInvertedQuad() と全く同じ cover 計算を使うことで、
-  ランドマークを「実際に表示されているカメラ映像」の座標へ変換する。
-  */
   const vw=camVideo&&camVideo.videoWidth?camVideo.videoWidth:1;
   const vh=camVideo&&camVideo.videoHeight?camVideo.videoHeight:1;
 
